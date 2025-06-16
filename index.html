@@ -405,10 +405,10 @@ function gameLoop(timestamp = 0) {
 
   if (timeLeft <= SPEED_UP_THRESHOLD) {
     spawnInterval = spawnIntervalFast / 2;
-    maxDialogs = 3;
+    maxDialogs = 5;
   } else {
     spawnInterval = spawnIntervalNormal;
-    maxDialogs = 2;
+    maxDialogs = 3;
   }
 
   if (timestamp - lastSpawn > spawnInterval && dialogs.length < maxDialogs) {
