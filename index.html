@@ -245,22 +245,20 @@ class DialogBox {
     ctx.lineTo(offsetX - size, offsetY + size);
     ctx.stroke();
 
-    // 左側禁按鈕（禁止符號）
-    ctx.fillStyle = "#fff";
-    roundRect(ctx, this.disableButtonX, this.disableButtonY, this.disableButtonWidth, this.disableButtonHeight, 10, true, false);
+   // 左側禁按鈕（顯示「禁」字）
+ctx.fillStyle = "#fff";
+roundRect(ctx, this.disableButtonX, this.disableButtonY, this.disableButtonWidth, this.disableButtonHeight, 10, true, false);
 
-    ctx.strokeStyle = "#C83232";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    const centerX = this.disableButtonX + this.disableButtonWidth / 2;
-    const centerY = this.disableButtonY + this.disableButtonHeight / 2;
-    const radius = Math.min(this.disableButtonWidth, this.disableButtonHeight) / 3;
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.moveTo(centerX - radius * 0.7, centerY - radius * 0.7);
-    ctx.lineTo(centerX + radius * 0.7, centerY + radius * 0.7);
-    ctx.moveTo(centerX + radius * 0.7, centerY - radius * 0.7);
-    ctx.lineTo(centerX - radius * 0.7, centerY + radius * 0.7);
-    ctx.stroke();
+ctx.fillStyle = "#C83232";
+ctx.font = "bold 28px 微軟正黑體";
+ctx.textBaseline = "middle";
+ctx.textAlign = "center";
+
+const centerX = this.disableButtonX + this.disableButtonWidth / 2;
+const centerY = this.disableButtonY + this.disableButtonHeight / 2;
+
+ctx.fillText("禁", centerX, centerY);
+
 
     ctx.restore();
   }
