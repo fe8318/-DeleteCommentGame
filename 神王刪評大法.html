@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>刪評模擬器</title>
+<style>
+  body { margin:0; background:#222; color:#fff; font-family: "微軟正黑體", sans-serif; }
+  canvas { display:block; margin: 0 auto; background: #333; }
+
+  #score, #timer, #redProb, #buttons {
+    font-size: 24px; 
+    padding: 10px; 
+    text-align: center; 
+  }
+
+  #buttons {
+    margin-bottom: 10px;
+  }
+
+  button {
+    font-size: 20px;
+    padding: 8px 20px;
+    margin: 0 10px;
+    cursor: pointer;
+    border-radius: 8px;
+    border: none;
+    background-color: #555;
+    color: white;
+  }
+  button:hover {
+    background-color: #888;
+  }
+container {
+    max-width: 400px;
+    margin: 20px auto;
+  }
+  .toggle-btn {
+    cursor: pointer;
+    background-color: #555;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 12px;
+    user-select: none;
+  }
+  .content {
+    background-color: #333333;
+    color: white;
+    padding: 15px 20px;
+    border-radius: 12px;
+    margin-top: 10px;
+    text-align: center;
+    transition: max-height 0.3s ease;
+    overflow: hidden;
+  }
+  .content.collapsed {
+    max-height: 0;
+    padding: 0 20px; /* 上下padding收掉 */
+  }
+</style>
+</head>
+<body>
+
+<div id="buttons">
+  <button id="startBtn">開始遊戲</button>
+  <button id="restartBtn" disabled>重新開始</button>
+</div>
+
+<div class="container">
+  <div class="toggle-btn" onclick="toggleContent()">說明（點擊展開/收合）</div>
+  <div id="content" class="content collapsed">
+  這是一個讓你親自體驗神王刪文快感的網頁小糞Game。<br>
+  用滑鼠按下對話框的X來刪除你討厭的留言吧！<br>
+  
+但要注意，和神王不同的是，<br>
+為了刪除更多你討厭的留言，<br>
+你不能禁止他們發言，<br>
+反之，你要禁止那些喜歡你的留言！<br>
+  現在，開始刪文吧！<br>
+  </div>
+</div>
+
+<div id="score">分數: 0</div>
+<div id="timer">時間: 60秒</div>
+<div id="redProb">紅色出現機率: 0%</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+function toggleContent() {
+    const content = document.getElementById('content');
+    content.classList.toggle('collapsed');
+  }
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const redTexts = [
+  "別再和爸爸借錢了，你已經還不完了",
+  "有借有還、再借不難",
+  "神王，人家只是一個正常的女孩子，不是來傷害你的",
+  "還是別去貸款了吧？",
+  "不不不，湯姆熊不算一種投資渠道。"
+];
+
+const blueTexts = [
+  "我覺得神王沒有錯。",
+  "+1+1",
+  "神王666。",
+  "神王說的永遠是對的。",
+  "神王，我是妹子，加我好友吧？"
+];
+
+// 遊戲設定
+const GAME_DURATION = 40000; // 60秒
+const SPEED_UP_THRESHOLD = 20000; // 剩15秒開始加速
+const maxWidth = 350; // 對話框最大寬度
+
+let dialogs = [];
+let score = 0;
+let redProbability = 0.7; // 初始紅色機率，會動態調整，0.1~0.6範圍
+const redProbMin = 0.3;
+const redProbMax = 0.8;
+
+let spawnIntervalNormal = 300;  // 300ms間隔產生，正常狀態2個上限
+let spawnIntervalFast = 100;    // 100ms間隔產生，剩15秒狀態3個上限
+let spawnInterval = spawnIntervalNormal;
+let maxDialogs = 3;
+
+let lastSpawn = 0;
+let startTime = null;
+let gameOver = false;
+let gameStarted = false;  // 新增控制遊戲狀態
+
+class DialogBox {
+  constructor(color, text) {
+    this.color = color;
+    this.text = text;
+    this.maxWidth = maxWidth; // 最大寬度350
+    this.lineHeight = 24; // 行高
+
+    ctx.font = "20px 微軟正黑體";
+    this.lines = this.wrapText(text, this.maxWidth - 80); // 預留左右內距80px(左右各40)，因新增左側禁按鈕40px
+
+    this.width = this.maxWidth;
+    this.height = this.lines.length * this.lineHeight + 20; // 上下內距10px
+    this.height = Math.max(this.height, 60); // 高度最低60
+
+    this.x = canvas.width;
+    this.y = Math.random() * (canvas.height - this.height - 20) + 10;
+    this.speed = 5;
+
+    // 右側X按鈕區域（固定大小）
+    this.buttonWidth = 40;
+    this.buttonHeight = this.height - 20;
+    this.buttonX = this.x + this.width - this.buttonWidth - 10;
+    this.buttonY = this.y + 10;
+
+    // 新增左側禁按鈕區域（固定大小）
+    this.disableButtonWidth = 40;
+    this.disableButtonHeight = this.height - 20;
+    this.disableButtonX = this.x + 10;
+    this.disableButtonY = this.y + 10;
+
+    this.isRemoving = false;
+    this.removeScale = 1;
+    this.removeAlpha = 1;
+  }
+
+  wrapText(text, maxWidth) {
+    const words = text.split("");
+    let lines = [];
+    let line = "";
+
+    for (let i = 0; i < words.length; i++) {
+      let testLine = line + words[i];
+      let metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && line !== "") {
+        lines.push(line);
+        line = words[i];
+      } else {
+        line = testLine;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  update() {
+    if (this.isRemoving) {
+      this.removeScale += 0.05;
+      this.removeAlpha -= 0.05;
+      if (this.removeAlpha <= 0) return false;
+      return true;
+    }
+
+    this.x -= this.speed;
+
+    this.buttonX = this.x + this.width - this.buttonWidth - 10;
+    this.buttonY = this.y + 10;
+
+    this.disableButtonX = this.x + 10;
+    this.disableButtonY = this.y + 10;
+
+    return this.x + this.width > 0;
+  }
+
+  draw() {
+    ctx.save();
+    if (this.isRemoving) {
+      ctx.globalAlpha = this.removeAlpha;
+      ctx.translate(this.x + this.width/2, this.y + this.height/2);
+      ctx.scale(this.removeScale, this.removeScale);
+      ctx.translate(-this.x - this.width/2, -this.y - this.height/2);
+    }
+
+    ctx.fillStyle = this.color;
+    roundRect(ctx, this.x, this.y, this.width, this.height, 15, true, false);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "20px 微軟正黑體";
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+
+    let textX = this.x + 50; // 左側禁按鈕40 + 10間距
+    let textY = this.y + 10;
+    for (let line of this.lines) {
+      ctx.fillText(line, textX, textY);
+      textY += this.lineHeight;
+    }
+
+    // 右側X按鈕
+    ctx.fillStyle = "#fff";
+    roundRect(ctx, this.buttonX, this.buttonY, this.buttonWidth, this.buttonHeight, 10, true, false);
+
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const offsetX = this.buttonX + this.buttonWidth/2;
+    const offsetY = this.buttonY + this.buttonHeight/2;
+    const size = 10;
+    ctx.moveTo(offsetX - size, offsetY - size);
+    ctx.lineTo(offsetX + size, offsetY + size);
+    ctx.moveTo(offsetX + size, offsetY - size);
+    ctx.lineTo(offsetX - size, offsetY + size);
+    ctx.stroke();
+
+    // 左側禁按鈕（禁止符號）
+    ctx.fillStyle = "#fff";
+    roundRect(ctx, this.disableButtonX, this.disableButtonY, this.disableButtonWidth, this.disableButtonHeight, 10, true, false);
+
+    ctx.strokeStyle = "#C83232";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    const centerX = this.disableButtonX + this.disableButtonWidth / 2;
+    const centerY = this.disableButtonY + this.disableButtonHeight / 2;
+    const radius = Math.min(this.disableButtonWidth, this.disableButtonHeight) / 3;
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.moveTo(centerX - radius * 0.7, centerY - radius * 0.7);
+    ctx.lineTo(centerX + radius * 0.7, centerY + radius * 0.7);
+    ctx.moveTo(centerX + radius * 0.7, centerY - radius * 0.7);
+    ctx.lineTo(centerX - radius * 0.7, centerY + radius * 0.7);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  isClicked(mx, my) {
+    const onDisableButton = mx >= this.disableButtonX && mx <= this.disableButtonX + this.disableButtonWidth &&
+                            my >= this.disableButtonY && my <= this.disableButtonY + this.disableButtonHeight;
+
+    const onXButton = mx >= this.buttonX && mx <= this.buttonX + this.buttonWidth &&
+                      my >= this.buttonY && my <= this.buttonY + this.buttonHeight;
+
+    return {
+      disableButton: onDisableButton,
+      xButton: onXButton
+    };
+  }
+
+  startRemoveAnimation() {
+    this.isRemoving = true;
+  }
+}
+
+function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+  if (typeof stroke === 'undefined') stroke = true;
+  if (typeof radius === 'undefined') radius = 5;
+  if (typeof radius === 'number') {
+    radius = {tl: radius, tr: radius, br: radius, bl: radius};
+  } else {
+    var defaultRadius = {tl: 0, tr: 0, br: 0, bl: 0};
+    for (var side in defaultRadius) {
+      radius[side] = radius[side] || defaultRadius[side];
+    }
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + radius.tl, y);
+  ctx.lineTo(x + width - radius.tr, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius.tr);
+  ctx.lineTo(x + width, y + height - radius.br);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius.br, y + height);
+  ctx.lineTo(x + radius.bl, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius.bl);
+  ctx.lineTo(x, y + radius.tl);
+  ctx.quadraticCurveTo(x, y, x + radius.tl, y);
+  ctx.closePath();
+  if (fill) ctx.fill();
+  if (stroke) ctx.stroke();
+}
+
+// 產生一個對話框，根據紅藍機率動態調整
+function spawnDialog() {
+  let isRed = Math.random() < redProbability;
+  let color = isRed ? "#C83232" : "#3248C8";
+  let text = isRed ? redTexts[Math.floor(Math.random() * redTexts.length)] : blueTexts[Math.floor(Math.random() * blueTexts.length)];
+  dialogs.push(new DialogBox(color, text));
+}
+
+// 點擊事件
+canvas.addEventListener("click", (e) => {
+  if (!gameStarted || gameOver) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  for (let i = dialogs.length - 1; i >= 0; i--) {
+    const clicked = dialogs[i].isClicked(mx, my);
+    if (clicked.disableButton) {
+      if (!dialogs[i].isRemoving) {
+        dialogs[i].startRemoveAnimation();
+
+        if (dialogs[i].color === "#C83232") {
+          redProbability = Math.max(redProbMin, redProbability - 0.02);
+        } else {
+          redProbability = Math.min(redProbMax, redProbability + 0.02);
+        }
+      }
+      break;
+    } else if (clicked.xButton) {
+      if (!dialogs[i].isRemoving) {
+        dialogs[i].startRemoveAnimation();
+
+        if (dialogs[i].color === "#C83232") {
+          score++;
+        }
+        updateScore();
+      }
+      break;
+    }
+  }
+});
+
+function updateScore() {
+  document.getElementById("score").textContent = `分數: ${score}`;
+}
+
+function updateTimer(timeLeft) {
+  document.getElementById("timer").textContent = `時間: ${Math.ceil(timeLeft / 1000)}秒`;
+}
+
+function updateRedProbability() {
+  // 顯示百分比，四捨五入至小數點1位
+  let percent = (redProbability * 100).toFixed(1);
+  document.getElementById("redProb").textContent = `紅色出現機率: ${percent}%`;
+}
+
+function resetGame() {
+  dialogs = [];
+  score = 0;
+  redProbability = 0.7;
+  lastSpawn = 0;
+  startTime = null;
+  gameOver = false;
+  updateScore();
+  updateRedProbability();
+  updateTimer(GAME_DURATION);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function gameLoop(timestamp = 0) {
+  if (!gameStarted || gameOver) return;
+
+  if (!startTime) startTime = timestamp;
+  const elapsed = timestamp - startTime;
+  const timeLeft = Math.max(0, GAME_DURATION - elapsed);
+  updateTimer(timeLeft);
+  updateRedProbability();
+
+  if (timeLeft <= 0) {
+    gameOver = true;
+    gameStarted = false;
+
+    // 顯示結束訊息
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "48px 微軟正黑體";
+    ctx.textAlign = "center";
+    ctx.fillText(`遊戲結束！你的分數：${score}`, canvas.width / 2, canvas.height / 2);
+
+    // 啟用重新開始按鈕，停用開始按鈕
+    startBtn.disabled = false;
+    restartBtn.disabled = false;
+    return;
+  }
+
+  if (timeLeft <= SPEED_UP_THRESHOLD) {
+    spawnInterval = spawnIntervalFast / 2;
+    maxDialogs = 3;
+  } else {
+    spawnInterval = spawnIntervalNormal;
+    maxDialogs = 2;
+  }
+
+  if (timestamp - lastSpawn > spawnInterval && dialogs.length < maxDialogs) {
+    spawnDialog();
+    lastSpawn = timestamp;
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let i = dialogs.length - 1; i >= 0; i--) {
+    const stillExist = dialogs[i].update();
+    dialogs[i].draw();
+    if (!stillExist) {
+      dialogs.splice(i, 1);
+    }
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+const startBtn = document.getElementById("startBtn");
+const restartBtn = document.getElementById("restartBtn");
+
+startBtn.addEventListener("click", () => {
+  if (gameStarted) return;
+  resetGame();
+  gameStarted = true;
+  gameOver = false;
+  startBtn.disabled = true;
+  restartBtn.disabled = true;
+  requestAnimationFrame(gameLoop);
+});
+
+restartBtn.addEventListener("click", () => {
+  resetGame();
+  gameStarted = true;
+  gameOver = false;
+  startBtn.disabled = true;
+  restartBtn.disabled = true;
+  requestAnimationFrame(gameLoop);
+});
+
+updateScore();
+updateTimer(GAME_DURATION);
+updateRedProbability();
+
+</script>
+
+</body>
+</html>
